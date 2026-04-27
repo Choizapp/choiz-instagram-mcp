@@ -20,12 +20,14 @@ class MediaType(str, Enum):
 class InsightMetric(str, Enum):
     """Available insight metrics."""
 
-    IMPRESSIONS = "impressions"
     REACH = "reach"
+    VIEWS = "views"
     LIKES = "likes"
     COMMENTS = "comments"
     SHARES = "shares"
     SAVED = "saved"
+    FOLLOWS = "follows"
+    TOTAL_INTERACTIONS = "total_interactions"
     VIDEO_VIEWS = "video_views"
     PROFILE_VISITS = "profile_visits"
     WEBSITE_CLICKS = "website_clicks"

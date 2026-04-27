@@ -381,10 +381,12 @@ class InstagramClient:
         if not metrics:
             metrics = [
                 InsightMetric.REACH,
+                InsightMetric.VIEWS,
                 InsightMetric.LIKES,
                 InsightMetric.COMMENTS,
                 InsightMetric.SHARES,
                 InsightMetric.SAVED,
+                InsightMetric.TOTAL_INTERACTIONS,
             ]
 
         params = {"metric": ",".join([m.value for m in metrics])}

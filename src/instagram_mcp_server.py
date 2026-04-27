@@ -119,17 +119,22 @@ class InstagramMCPServer:
                                     "type": "string",
                                     "enum": [
                                         "reach",
+                                        "views",
                                         "likes",
                                         "comments",
                                         "shares",
                                         "saved",
+                                        "follows",
+                                        "total_interactions",
                                         "video_views",
                                     ],
                                 },
                                 "description": (
                                     "Specific metrics to retrieve (optional, "
                                     "gets all available if not specified). "
-                                    "Note: video_views only works for video posts"
+                                    "Note: video_views only works for video posts. "
+                                    "'views' replaces the deprecated 'impressions' metric. "
+                                    "'follows' returns profile follows from this post."
                                 ),
                             },
                         },
