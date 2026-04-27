@@ -73,6 +73,19 @@ class RateLimitInfo(BaseModel):
     total_time: int
 
 
+def _strip_cdn_query(v):
+    """Strip the query string from CDN URLs.
+
+    Facebook/Instagram CDN URLs carry signed auth params (_nc_cat, ccb,
+    _nc_sid, _nc_ohc, oh, oe...) that are 400-500 chars long, expire in
+    hours, and bloat MCP responses. The base URL alone is enough for the
+    LLM; consumers needing fresh signed URLs should re-fetch.
+    """
+    if isinstance(v, str) and "?" in v:
+        return v.split("?", 1)[0]
+    return v
+
+
 class InstagramProfile(BaseModel):
     """Instagram business profile information."""
 
@@ -85,6 +98,11 @@ class InstagramProfile(BaseModel):
     follows_count: Optional[int] = None
     media_count: Optional[int] = None
     profile_picture_url: Optional[str] = None
+
+    @field_validator("profile_picture_url", mode="after")
+    @classmethod
+    def _strip_profile_pic_query(cls, v):
+        return _strip_cdn_query(v)
 
 
 class InstagramMedia(BaseModel):
@@ -107,6 +125,11 @@ class InstagramMedia(BaseModel):
         if isinstance(v, str):
             return datetime.fromisoformat(v.replace("Z", "+00:00"))
         return v
+
+    @field_validator("media_url", "thumbnail_url", mode="after")
+    @classmethod
+    def _strip_media_url_query(cls, v):
+        return _strip_cdn_query(v)
 
 
 class UserTag(BaseModel):

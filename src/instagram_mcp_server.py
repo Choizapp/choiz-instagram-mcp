@@ -519,7 +519,10 @@ class InstagramMCPServer:
                     success=False, error=f"Tool execution failed: {str(e)}"
                 )
 
-            return [TextContent(type="text", text=json.dumps(result.model_dump(mode='json'), indent=2))]
+            # Compact JSON (no indent) keeps MCP responses small enough to fit
+            # within the streamable-http chunk budget claude.ai applies before
+            # rejecting tool results as "Error occurred during tool execution".
+            return [TextContent(type="text", text=json.dumps(result.model_dump(mode='json')))]
 
         # Resources
         @self.server.list_resources()
