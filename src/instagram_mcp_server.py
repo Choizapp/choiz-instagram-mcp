@@ -19,6 +19,7 @@ from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.types import Prompt, Resource, TextContent, Tool
 
+from . import business_discovery
 from .config import get_settings
 from .instagram_client import InstagramAPIError, InstagramClient
 from .models.instagram_models import (
@@ -310,6 +311,168 @@ class InstagramMCPServer:
                         "required": ["recipient_id", "message"],
                     },
                 ),
+                # --- Competitor research (business_discovery) -------------
+                # Read-only, public data about OTHER accounts. See
+                # src/business_discovery.py for what this edge can and cannot
+                # do — notably: keyed by handle, never by post URL alone, and
+                # only public Business/Creator accounts are visible.
+                Tool(
+                    name="get_competitor_profile",
+                    description=(
+                        "Public profile snapshot of ANOTHER Instagram account "
+                        "(competitor): followers, following, post count, bio, "
+                        "website. Target must be a public Business or Creator "
+                        "account."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "username": {
+                                "type": "string",
+                                "description": "Competitor handle, e.g. 'nike' (no @)",
+                            },
+                        },
+                        "required": ["username"],
+                    },
+                ),
+                Tool(
+                    name="get_competitor_posts",
+                    description=(
+                        "Posts from ANOTHER Instagram account (competitor) with "
+                        "caption, engagement and carousel slide count. Use "
+                        "sort='engagement' to see what works best for them. "
+                        "Target must be a public Business or Creator account. "
+                        "Reach, impressions, saves and comment text are NOT "
+                        "available for accounts you do not own."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "username": {
+                                "type": "string",
+                                "description": "Competitor handle, e.g. 'nike' (no @)",
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": (
+                                    "Posts to return. Defaults are sized to keep "
+                                    "the result around 3 KB; raise both this and "
+                                    "caption_chars deliberately."
+                                ),
+                                "minimum": 1,
+                                "maximum": 50,
+                                "default": 5,
+                            },
+                            "sort": {
+                                "type": "string",
+                                "enum": ["recent", "engagement"],
+                                "description": (
+                                    "'recent' = newest first; 'engagement' = "
+                                    "best likes+comments among posts scanned"
+                                ),
+                                "default": "recent",
+                            },
+                            "since": {
+                                "type": "string",
+                                "description": "Only posts on/after this date (YYYY-MM-DD)",
+                            },
+                            "until": {
+                                "type": "string",
+                                "description": "Only posts on/before this date (YYYY-MM-DD)",
+                            },
+                            "include_media_urls": {
+                                "type": "boolean",
+                                "description": (
+                                    "Include signed image/video CDN URLs per "
+                                    "slide. Large and they expire within hours "
+                                    "— only for actually fetching the creative."
+                                ),
+                                "default": False,
+                            },
+                            "caption_chars": {
+                                "type": "integer",
+                                "description": "Truncate captions to this length",
+                                "minimum": 0,
+                                "maximum": 4000,
+                                "default": 400,
+                            },
+                            "max_pages": {
+                                "type": "integer",
+                                "description": "Feed pages to scan (25 posts each)",
+                                "minimum": 1,
+                                "maximum": 20,
+                                "default": 4,
+                            },
+                        },
+                        "required": ["username"],
+                    },
+                ),
+                Tool(
+                    name="get_competitor_post",
+                    description=(
+                        "Look up ONE specific competitor post from its URL, with "
+                        "the full caption and every carousel slide. REQUIRES the "
+                        "account handle as well: the Graph API has no lookup by "
+                        "post URL, so this pages that account's feed until the "
+                        "shortcode matches."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "username": {
+                                "type": "string",
+                                "description": "Handle that OWNS the post, e.g. 'nike'",
+                            },
+                            "post": {
+                                "type": "string",
+                                "description": (
+                                    "Post URL (https://www.instagram.com/p/ABC123/) "
+                                    "or bare shortcode (ABC123)"
+                                ),
+                            },
+                            "include_media_urls": {
+                                "type": "boolean",
+                                "description": "Include signed CDN URLs per slide",
+                                "default": True,
+                            },
+                            "max_pages": {
+                                "type": "integer",
+                                "description": "Feed pages to scan (25 posts each)",
+                                "minimum": 1,
+                                "maximum": 20,
+                                "default": 8,
+                            },
+                        },
+                        "required": ["username", "post"],
+                    },
+                ),
+                Tool(
+                    name="compare_competitors",
+                    description=(
+                        "Side-by-side snapshot of several competitor accounts: "
+                        "followers plus their top recent posts. Start here, then "
+                        "drill in with get_competitor_posts. Max 5 accounts."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "usernames": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Competitor handles (max 5)",
+                                "maxItems": 5,
+                            },
+                            "limit_per_account": {
+                                "type": "integer",
+                                "description": "Top posts per account",
+                                "minimum": 1,
+                                "maximum": 10,
+                                "default": 3,
+                            },
+                        },
+                        "required": ["usernames"],
+                    },
+                ),
             ]
 
         @self.server.call_tool()
@@ -499,8 +662,93 @@ class InstagramMCPServer:
                         },
                     )
 
+                # --- Competitor research (business_discovery) -------------
+                # These four never touch our own account's data; they read
+                # public Business/Creator accounts through the
+                # business_discovery edge. All shaping lives in
+                # src/business_discovery.py so the owner-account tools above
+                # are untouched.
+                elif name == "get_competitor_profile":
+                    data = await business_discovery.get_profile(
+                        instagram_client, arguments["username"]
+                    )
+                    result = MCPToolResult(
+                        success=True,
+                        data=data,
+                        metadata={
+                            "tool": name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+
+                elif name == "get_competitor_posts":
+                    data = await business_discovery.list_posts(
+                        instagram_client,
+                        arguments["username"],
+                        limit=arguments.get("limit", business_discovery.POSTS_DEFAULT),
+                        since=arguments.get("since"),
+                        until=arguments.get("until"),
+                        sort=arguments.get("sort", "recent"),
+                        include_media_urls=arguments.get("include_media_urls", False),
+                        caption_chars=arguments.get(
+                            "caption_chars", business_discovery.CAPTION_CHARS_DEFAULT
+                        ),
+                        max_pages=arguments.get("max_pages", 4),
+                    )
+                    result = MCPToolResult(
+                        success=True,
+                        data=data,
+                        metadata={
+                            "tool": name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+
+                elif name == "get_competitor_post":
+                    data = await business_discovery.find_post(
+                        instagram_client,
+                        arguments["username"],
+                        arguments["post"],
+                        include_media_urls=arguments.get("include_media_urls", True),
+                        max_pages=arguments.get("max_pages", 8),
+                    )
+                    result = MCPToolResult(
+                        success=True,
+                        data=data,
+                        metadata={
+                            "tool": name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+
+                elif name == "compare_competitors":
+                    data = await business_discovery.compare(
+                        instagram_client,
+                        arguments["usernames"],
+                        limit_per_account=arguments.get("limit_per_account", 3),
+                    )
+                    result = MCPToolResult(
+                        success=True,
+                        data=data,
+                        metadata={
+                            "tool": name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+
                 else:
                     result = MCPToolResult(success=False, error=f"Unknown tool: {name}")
+
+            except business_discovery.CompetitorLookupError as e:
+                # Expected, explainable failures (bad handle, private account,
+                # missing permission). Surfaced as a normal tool result with a
+                # hint so the model can correct itself instead of retrying blind.
+                logger.info("Competitor lookup failed", tool=name, error=e.message)
+                result = MCPToolResult(
+                    success=False,
+                    error=e.message,
+                    metadata={"tool": name, "hint": e.hint},
+                )
 
             except InstagramAPIError as e:
                 logger.error("Instagram API error", tool=name, error=str(e))
