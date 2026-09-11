@@ -39,8 +39,9 @@ Required permissions on the access token: ``instagram_basic``,
 
 CDN URLs
 --------
-``media_url`` values are signed scontent.cdninstagram.com links: ~400 chars each
-and they expire within hours. They are omitted by default — callers that
+``media_url`` values are signed scontent.cdninstagram.com links: **~600 chars
+each** (measured 2026-09-11, not estimated — an 8-slide carousel is ~4.8 KB of
+URLs alone) and they expire within hours. They are omitted by default — callers that
 actually need to look at the creative pass ``include_media_urls=True``. Note
 this module builds PLAIN DICTS and never routes media through
 ``models.instagram_models``, whose validators strip query strings: stripping the
@@ -61,15 +62,31 @@ block below.
 
 The one deliberate exception is ``find_post``: one post, full caption, every
 slide. The caller already narrowed it to a single post, so the whole value of
-the call is completeness.
+the call is completeness — which on a 20-slide carousel with CDN URLs on means
+a response in the 10 KB range. That is the intended trade, not an oversight.
 
-STATUS (2026-09-11): field selections follow Meta's published reference and the
-full control flow — paging, date windows, sorting, shortcode matching, the
-view_count fallback, error mapping — is covered by an offline harness against a
-scripted fake Graph. It has NOT yet been exercised against the live API with a
-Choiz token; the permissions probe was still pending when this landed.
-``view_count`` in particular is requested optimistically and dropped
-automatically the first time Graph rejects it (see ``_view_count_supported``).
+STATUS — VERIFIED LIVE 2026-09-11
+---------------------------------
+Probed from the gateway EC2 with the production Timeless token against
+``nike``. Confirmed working, no App Review needed:
+
+* Permissions on the existing token are sufficient — no OAuthException.
+* ``id``, ``caption``, ``media_type``, ``media_product_type``, ``permalink``,
+  ``timestamp``, ``like_count``, ``comments_count``, ``children{id,media_type}``
+  and ``media_url`` (on both parent and children) all return data.
+* ``view_count`` is ACCEPTED by the edge — Graph simply omits it where it does
+  not apply (a photo carousel has no views) rather than erroring. So
+  ``_view_count_supported`` is expected to stay True in practice; the fallback
+  below is belt-and-braces for a future API change, not a known failure.
+* A CAROUSEL_ALBUM parent DOES carry its own ``media_url`` (the first slide).
+  ``shape_post`` prefers the children list anyway, so this changes nothing.
+* Reels come back with ``media_product_type: "REELS"`` and a ``/reel/<code>/``
+  permalink, which ``PERMALINK_RE`` already matches.
+
+Control flow — paging, cursor exhaustion, date windows, sorting, shortcode
+matching, error mapping, the view_count fallback, payload budgets — is covered
+by an offline harness against a scripted fake Graph, plus a round-trip through
+the real MCP lowlevel Server.
 """
 
 from __future__ import annotations
