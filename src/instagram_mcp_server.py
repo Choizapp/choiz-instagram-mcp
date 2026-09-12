@@ -17,7 +17,20 @@ from mcp.server import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
-from mcp.types import Prompt, Resource, TextContent, Tool
+from mcp.types import (
+    CallToolResult,
+    GetPromptResult,
+    ListPromptsResult,
+    ListResourcesResult,
+    ListToolsResult,
+    Prompt,
+    PromptMessage,
+    ReadResourceResult,
+    Resource,
+    TextContent,
+    TextResourceContents,
+    Tool,
+)
 
 from . import business_discovery
 from .config import get_settings
@@ -41,14 +54,18 @@ class InstagramMCPServer:
 
     def __init__(self):
         self.settings = get_settings()
-        self.server = Server(self.settings.mcp_server_name)
-        self._setup_handlers()
+        # mcp 2.x registers handlers as explicit constructor callbacks instead
+        # of the @server.list_tools() / @server.call_tool() decorators, which
+        # no longer exist. The handler bodies below are unchanged; only the
+        # boundary with the SDK moved.
+        self.server = Server(
+            self.settings.mcp_server_name, **self._build_handlers()
+        )
 
-    def _setup_handlers(self):
-        """Set up MCP server handlers."""
+    def _build_handlers(self):
+        """Build the handler callbacks mcp 2.x takes in Server(...)."""
 
         # Tools
-        @self.server.list_tools()
         async def handle_list_tools() -> List[Tool]:
             """List available tools."""
             return [
@@ -58,7 +75,7 @@ class InstagramMCPServer:
                         "Get Instagram business profile information including "
                         "followers, bio, and account details"
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "account_id": {
@@ -77,7 +94,7 @@ class InstagramMCPServer:
                         "Get recent media posts from Instagram account "
                         "with engagement metrics"
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "account_id": {
@@ -107,7 +124,7 @@ class InstagramMCPServer:
                         "Get detailed insights and analytics for a "
                         "specific Instagram post"
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "media_id": {
@@ -148,7 +165,7 @@ class InstagramMCPServer:
                         "Upload and publish an image or video to Instagram "
                         "with caption and optional location"
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "image_url": {
@@ -190,7 +207,7 @@ class InstagramMCPServer:
                         "Get Facebook pages connected to the account and "
                         "their Instagram business accounts"
                     ),
-                    inputSchema={"type": "object", "properties": {}},
+                    input_schema={"type": "object", "properties": {}},
                 ),
                 Tool(
                     name="get_account_insights",
@@ -198,7 +215,7 @@ class InstagramMCPServer:
                         "Get account-level insights and analytics for "
                         "Instagram business account"
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "account_id": {
@@ -233,7 +250,7 @@ class InstagramMCPServer:
                         "Validate the Instagram API access token and "
                         "check permissions"
                     ),
-                    inputSchema={"type": "object", "properties": {}},
+                    input_schema={"type": "object", "properties": {}},
                 ),
                 Tool(
                     name="get_conversations",
@@ -242,7 +259,7 @@ class InstagramMCPServer:
                         "Requires instagram_manage_messages permission. "
                         "Lists all conversations for the connected Instagram account."
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "page_id": {
@@ -269,7 +286,7 @@ class InstagramMCPServer:
                         "Requires instagram_manage_messages permission. "
                         "Use get_conversations to get conversation IDs."
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "conversation_id": {
@@ -295,7 +312,7 @@ class InstagramMCPServer:
                         "Can only reply within 24 hours of user's last message. "
                         "Recipient must have initiated conversation first."
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "recipient_id": {
@@ -324,7 +341,7 @@ class InstagramMCPServer:
                         "website. Target must be a public Business or Creator "
                         "account."
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "username": {
@@ -345,7 +362,7 @@ class InstagramMCPServer:
                         "Reach, impressions, saves and comment text are NOT "
                         "available for accounts you do not own."
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "username": {
@@ -416,7 +433,7 @@ class InstagramMCPServer:
                         "post URL, so this pages that account's feed until the "
                         "shortcode matches."
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "username": {
@@ -453,7 +470,7 @@ class InstagramMCPServer:
                         "followers plus their top recent posts. Start here, then "
                         "drill in with get_competitor_posts. Max 5 accounts."
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "properties": {
                             "usernames": {
@@ -475,7 +492,6 @@ class InstagramMCPServer:
                 ),
             ]
 
-        @self.server.call_tool()
         async def handle_call_tool(
             name: str, arguments: Dict[str, Any]
         ) -> Sequence[TextContent]:
@@ -773,7 +789,6 @@ class InstagramMCPServer:
             return [TextContent(type="text", text=json.dumps(result.model_dump(mode='json')))]
 
         # Resources
-        @self.server.list_resources()
         async def handle_list_resources() -> List[Resource]:
             """List available resources."""
             return [
@@ -803,7 +818,6 @@ class InstagramMCPServer:
                 ),
             ]
 
-        @self.server.read_resource()
         async def handle_read_resource(uri: str) -> str:
             """Handle resource reading."""
             global instagram_client
@@ -838,7 +852,6 @@ class InstagramMCPServer:
                 return json.dumps({"error": str(e)}, indent=2)
 
         # Prompts
-        @self.server.list_prompts()
         async def handle_list_prompts() -> List[Prompt]:
             """List available prompts."""
             return [
@@ -887,7 +900,6 @@ class InstagramMCPServer:
                 ),
             ]
 
-        @self.server.get_prompt()
         async def handle_get_prompt(name: str, arguments: Dict[str, str]) -> str:
             """Handle prompt requests."""
             global instagram_client
@@ -992,6 +1004,55 @@ Please provide:
             except Exception as e:
                 logger.error("Prompt generation error", prompt=name, error=str(e))
                 return f"Error generating prompt: {str(e)}"
+
+
+        # --- SDK boundary ------------------------------------------------
+        # mcp 2.x hands every handler a ServerRequestContext plus a typed
+        # params model, and expects a typed Result back -- where 1.x passed
+        # loose arguments and accepted a bare list. These adapters do only
+        # that translation so the handlers above stay untouched.
+
+        async def on_list_tools(ctx, params):
+            return ListToolsResult(tools=await handle_list_tools())
+
+        async def on_call_tool(ctx, params):
+            content = await handle_call_tool(params.name, params.arguments or {})
+            return CallToolResult(content=list(content))
+
+        async def on_list_resources(ctx, params):
+            return ListResourcesResult(resources=await handle_list_resources())
+
+        async def on_read_resource(ctx, params):
+            text = await handle_read_resource(str(params.uri))
+            return ReadResourceResult(
+                contents=[
+                    TextResourceContents(
+                        uri=params.uri, mime_type="application/json", text=text
+                    )
+                ]
+            )
+
+        async def on_list_prompts(ctx, params):
+            return ListPromptsResult(prompts=await handle_list_prompts())
+
+        async def on_get_prompt(ctx, params):
+            text = await handle_get_prompt(params.name, params.arguments or {})
+            return GetPromptResult(
+                messages=[
+                    PromptMessage(
+                        role="user", content=TextContent(type="text", text=text)
+                    )
+                ]
+            )
+
+        return {
+            "on_list_tools": on_list_tools,
+            "on_call_tool": on_call_tool,
+            "on_list_resources": on_list_resources,
+            "on_read_resource": on_read_resource,
+            "on_list_prompts": on_list_prompts,
+            "on_get_prompt": on_get_prompt,
+        }
 
     async def run(self):
         """Run the MCP server."""
